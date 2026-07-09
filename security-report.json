@@ -1,0 +1,69 @@
+{
+  "threshold_percent": 80,
+  "pass_percent": 80.0,
+  "passed": 8,
+  "total": 10,
+  "threshold_met": true,
+  "checks": [
+    {
+      "id": "SEC-001",
+      "title": "HTTPS on all listeners",
+      "passed": false,
+      "detail": "src/main/mule/test-automation.xml: listener not HTTPS"
+    },
+    {
+      "id": "SEC-002",
+      "title": "HTTPS on all outbound requests",
+      "passed": true,
+      "detail": "All http:request-connection elements use HTTPS"
+    },
+    {
+      "id": "SEC-003",
+      "title": "No hardcoded credentials in Mule XML",
+      "passed": true,
+      "detail": "No hardcoded credentials found in Mule XML"
+    },
+    {
+      "id": "SEC-004",
+      "title": "Secure properties configured for property files",
+      "passed": true,
+      "detail": "No property files present (nothing to secure)"
+    },
+    {
+      "id": "SEC-005",
+      "title": "TLS context on HTTPS listeners",
+      "passed": true,
+      "detail": "All HTTPS listeners include a tls:context (or none configured)"
+    },
+    {
+      "id": "SEC-006",
+      "title": "Wildcard bind (0.0.0.0) limited",
+      "passed": true,
+      "detail": "1 listener(s) bound to 0.0.0.0 within demo tolerance"
+    },
+    {
+      "id": "SEC-007",
+      "title": "Loggers do not dump full payload/attributes",
+      "passed": true,
+      "detail": "No loggers dump full payload/attributes"
+    },
+    {
+      "id": "SEC-008",
+      "title": "Error handlers on listener-fronted flows",
+      "passed": false,
+      "detail": "src/main/mule/test-automation.xml: flow munit-hello-worldFlow has no error-handler; src/main/mule/test-automation.xml: flow user-with-postsFlow has no error-handler"
+    },
+    {
+      "id": "SEC-009",
+      "title": "Dependency versions pinned in pom.xml",
+      "passed": true,
+      "detail": "All dependencies have pinned versions"
+    },
+    {
+      "id": "SEC-010",
+      "title": "CI credentials sourced from GitHub secrets",
+      "passed": true,
+      "detail": "CI credentials sourced from secrets"
+    }
+  ]
+}

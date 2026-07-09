@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="c4a3e70d-5ebb-403b-9e73-27b74f8fc900" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<flow name="munit-hello-worldFlow" doc:id="a3f1ff8a-b49a-44ef-ab1a-21e35474069e" >
+		<http:listener doc:name="GET /hello" doc:id="b217591d-7aa9-4490-b1b6-b59c2e69bb5a" config-ref="HTTP_Listener_config" path="/hello" allowedMethods="GET" />
+		<logger level="INFO" doc:name="Hello, Gon!" doc:id="7eec3bad-e63d-4985-9b2c-032da9befe98" message='#[%dw 2.0&#10;output application/json&#10;---&#10;{&#10;	"message": "Hello, Gon!"&#10;}]' />
+		<set-payload value='#[%dw 2.0&#10;output application/json&#10;---&#10;{&#10;	"message": "Hello, Gon!"&#10;}]' doc:name="Hello, Gon!1" doc:id="f0b1d08c-83cd-4b5e-b590-07836571e084" />
+	</flow>
+</mule>

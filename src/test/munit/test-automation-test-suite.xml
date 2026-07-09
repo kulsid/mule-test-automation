@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit" xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+	<munit:config name="test-automation-test-suite.xml" />
+	<munit:test name="test-automation-test-suite-munit-hello-worldFlowTest" doc:id="5b5aadbc-db7a-4992-ae8d-154090cef0a3" description="Test">
+		<munit:behavior >
+			<munit:set-event doc:name="Set Event" doc:id="c6c7ddd3-8221-4f88-8961-4e7e090e2037" />
+		</munit:behavior>
+		<munit:execution >
+			<flow-ref doc:name="Flow-ref to munit-hello-worldFlow" doc:id="0fd83e82-dc90-43c2-9852-46c5a0a35ec7" name="munit-hello-worldFlow"/>
+		</munit:execution>
+		<munit:validation >
+			<munit-tools:assert-that doc:name="Assert message equals Hello World!" doc:id="b9c8ea7e-1772-4b6a-81b5-f37f2d3f54de" expression="#[payload.message]" is='#[MunitTools::equalTo("Hello World!")]' />
+		</munit:validation>
+	</munit:test>
+	<munit:test name="test-automation-test-suite-user-with-postsFlowTest" doc:id="a1b2c3d4-e5f6-7890-abcd-ef1234567890" description="Combines /users/1 and /posts?userId=1 responses">
+		<munit:behavior>
+			<munit:set-event doc:name="Set Event" doc:id="b2c3d4e5-f6a7-8901-bcde-f12345678901" />
+			<munit-tools:mock-when doc:name="Mock GET /users/1" doc:id="c3d4e5f6-a7b8-9012-cdef-123456789012" processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute whereValue="/users/1" attributeName="path" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value='#[%dw 2.0
+output application/json
+---
+{
+	"id": 1,
+	"name": "Leanne Graham",
+	"username": "Bret",
+	"email": "Sincere@april.biz"
+}]' mediaType="application/json" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when doc:name="Mock GET /posts?userId=1" doc:id="d4e5f6a7-b8c9-0123-def1-234567890123" processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute whereValue="/posts" attributeName="path" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value='#[%dw 2.0
+output application/json
+---
+[
+	{ "userId": 1, "id": 1, "title": "post one", "body": "body one" },
+	{ "userId": 1, "id": 2, "title": "post two", "body": "body two" }
+]]' mediaType="application/json" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref doc:name="Flow-ref to user-with-postsFlow" doc:id="e5f6a7b8-c9d0-1234-ef12-345678901234" name="user-with-postsFlow" />
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that doc:name="Assert user name" doc:id="f6a7b8c9-d0e1-2345-f123-456789012345" expression="#[payload.user.name]" is='#[MunitTools::equalTo("Leanne Graham")]' />
+			<munit-tools:assert-that doc:name="Assert user id" doc:id="a7b8c9d0-e1f2-3456-1234-567890123456" expression="#[payload.user.id]" is='#[MunitTools::equalTo(1)]' />
+			<munit-tools:assert-that doc:name="Assert posts count" doc:id="b8c9d0e1-f2a3-4567-2345-678901234567" expression="#[sizeOf(payload.posts)]" is='#[MunitTools::equalTo(2)]' />
+			<munit-tools:assert-that doc:name="Assert first post title" doc:id="c9d0e1f2-a3b4-5678-3456-789012345678" expression="#[payload.posts[0].title]" is='#[MunitTools::equalTo("post one")]' />
+		</munit:validation>
+	</munit:test>
+
+</mule>

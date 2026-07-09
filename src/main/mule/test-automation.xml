@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="c4a3e70d-5ebb-403b-9e73-27b74f8fc900" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<http:request-config name="JSONPlaceholder_Request_config" doc:name="JSONPlaceholder Request config" doc:id="d7a0c81e-8b5c-4a4e-9f21-3a1b7c9d0e12">
+		<http:request-connection protocol="HTTPS" host="jsonplaceholder.typicode.com" port="443" />
+	</http:request-config>
+	<flow name="munit-hello-worldFlow" doc:id="a3f1ff8a-b49a-44ef-ab1a-21e35474069e" >
+		<http:listener doc:name="GET /hello" doc:id="b217591d-7aa9-4490-b1b6-b59c2e69bb5a" config-ref="HTTP_Listener_config" path="/hello" allowedMethods="GET" />
+		<logger level="INFO" doc:name="Hello World!" doc:id="7eec3bad-e63d-4985-9b2c-032da9befe98" message='#[%dw 2.0
+output application/json
+---
+{
+	"message": "Hello World!"
+}]' />
+		<set-payload value='#[%dw 2.0
+output application/json
+---
+{
+	"message": "Hello World!"
+}]' doc:name="Hello World!" doc:id="f0b1d08c-83cd-4b5e-b590-07836571e084" />
+	</flow>
+	<flow name="user-with-postsFlow" doc:id="b9e2a10c-4d3f-4b7e-9c14-6f8a2b5d3e77">
+		<http:listener doc:name="GET /user-posts" doc:id="c8d3b21f-5e4a-4c8f-a025-7e9b3c6d4f88" config-ref="HTTP_Listener_config" path="/user-posts" allowedMethods="GET" />
+		<http:request method="GET" doc:name="GET /users/1" doc:id="d1e4c32a-6f5b-4d90-b136-8f0c4d7e5a99" config-ref="JSONPlaceholder_Request_config" path="/users/1" />
+		<set-variable variableName="user" value="#[payload]" doc:name="Save user" doc:id="1a1a1a1a-1111-1111-1111-111111111111" />
+		<http:request method="GET" doc:name="GET /posts?userId=1" doc:id="e2f5d43b-7a6c-4e01-c247-9a1d5e8f6baa" config-ref="JSONPlaceholder_Request_config" path="/posts">
+			<http:query-params>#[{'userId': '1'}]</http:query-params>
+		</http:request>
+		<set-variable variableName="posts" value="#[payload]" doc:name="Save posts" doc:id="2b2b2b2b-2222-2222-2222-222222222222" />
+		<set-payload value='#[%dw 2.0
+output application/json
+---
+{
+	user: vars.user,
+	posts: vars.posts
+}]' doc:name="Combine user + posts" doc:id="f3a6e54c-8b7d-4f12-d358-ab2e6f907cbb" />
+	</flow>
+</mule>

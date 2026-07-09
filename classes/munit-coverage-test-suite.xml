@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit" xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+	<munit:config name="munit-coverage-test-suite.xml" />
+	<munit:test name="munit-coverage-test-suite-munit-hello-worldFlowTest" doc:id="5b5aadbc-db7a-4992-ae8d-154090cef0a3" description="Test">
+		<munit:behavior >
+			<munit:set-event doc:name="Set Event" doc:id="c6c7ddd3-8221-4f88-8961-4e7e090e2037" />
+		</munit:behavior>
+		<munit:execution >
+			<flow-ref doc:name="Flow-ref to munit-hello-worldFlow" doc:id="0fd83e82-dc90-43c2-9852-46c5a0a35ec7" name="munit-hello-worldFlow"/>
+		</munit:execution>
+		<munit:validation >
+			<munit-tools:assert-that doc:name="Assert message equals Hello, Gon!" doc:id="b9c8ea7e-1772-4b6a-81b5-f37f2d3f54de" expression="#[payload.message]" is='#[MunitTools::equalTo("Hello, Gon!")]' />
+		</munit:validation>
+	</munit:test>
+
+</mule>
