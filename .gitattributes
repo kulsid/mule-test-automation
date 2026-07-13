@@ -1,11 +1,19 @@
-reports/** linguist-generated=true
+# Mule application
+src/main/mule/** linguist-language=XML
+src/test/munit/** linguist-language=XML
+pom.xml linguist-language=XML
 
-# Mule application files
-src/**/*.xml linguist-language=XML
+# JMeter test plans
+.github/jmeter/**/*.jmx linguist-language=XML
 
-# GitHub automation scripts
+# Postman collections
+.github/postman/**/*.json linguist-language=JSON
+
+# GitHub Actions
+.github/workflows/* linguist-language=YAML
+
+# Python scripts
 .github/scripts/**/*.py linguist-language=Python
 
-# GitHub workflows
-.github/workflows/**/*.yml linguist-language=YAML
-.github/workflows/**/*.yaml linguist-language=YAML
+# Shell scripts
+.github/scripts/**/*.sh linguist-language=Shell
