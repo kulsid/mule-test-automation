@@ -8,8 +8,8 @@ YAML. Each check reports PASS or FAIL. The build fails if fewer than
 MIN_PASS_PERCENT of the checks pass.
 
 Outputs:
-  - security-report.md   (human-readable, uploaded as artifact)
-  - security-report.json (machine-readable)
+  - security-report.json (machine-readable — read by render-security-report.py)
+  - stdout: the same content in Markdown for humans watching the CI log
 
 Reference: https://docs.mulesoft.com/general/security-best-practices
 """
@@ -22,7 +22,13 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-MIN_PASS_PERCENT = 80
+# Threshold sourced from the MULESOFT_SECURITY_MIN_PASS_PERCENT GitHub
+# Actions repository variable, injected via the workflow's env: block.
+# Falls back to 80 for local runs (`python3 security-scan.py`).
+try:
+    MIN_PASS_PERCENT = int(os.environ.get("MULESOFT_SECURITY_MIN_PASS_PERCENT", "80"))
+except ValueError:
+    MIN_PASS_PERCENT = 80
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MULE_DIR = REPO_ROOT / "src" / "main" / "mule"
 RESOURCES_DIR = REPO_ROOT / "src" / "main" / "resources"
@@ -311,8 +317,10 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    # Markdown report
-    lines = [
+    # Console echo — assemble a markdown table so anyone tailing the CI
+    # log gets a readable summary. Not written to disk; the JSON above
+    # is the durable output that render-security-report.py consumes.
+    md_lines = [
         "# MuleSoft Security Best-Practices Scan",
         "",
         f"**Pass rate:** {passed}/{total} = **{pct:.1f}%** (threshold: {MIN_PASS_PERCENT}%)",
@@ -323,22 +331,41 @@ def main() -> int:
     ]
     for r in results:
         mark = "PASS" if r["passed"] else "FAIL"
-        lines.append(f"| {r['id']} | {r['title']} | **{mark}** | {r['detail']} |")
-    lines.append("")
-    lines.append(
+        md_lines.append(f"| {r['id']} | {r['title']} | **{mark}** | {r['detail']} |")
+    md_lines.append("")
+    md_lines.append(
         "Reference: https://docs.mulesoft.com/general/security-best-practices"
     )
-    md = "\n".join(lines) + "\n"
-    (REPO_ROOT / "security-report.md").write_text(md, encoding="utf-8")
+    print("\n".join(md_lines))
 
-    # Console echo
-    print(md)
-
-    # Step summary
+    # Step summary — compact form. GitHub renders $GITHUB_STEP_SUMMARY at a
+    # fixed large font, so a 10-row wide table hogs the run page. Emit only
+    # the headline + any failing checks; the full table lives in the
+    # consolidated HTML report artifact.
     step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if step_summary:
+        failing = [r for r in results if not r["passed"]]
+        summary_lines = [
+            "### MuleSoft Security Best-Practices Scan",
+            "",
+            f"**Pass rate:** {passed}/{total} ({pct:.0f}%) — "
+            f"{'**PASSED** ✅' if threshold_met else '**FAILED** ❌'}",
+            "",
+        ]
+        if failing:
+            summary_lines.append(f"**Failing checks ({len(failing)}):**")
+            for r in failing:
+                summary_lines.append(f"- ❌ **{r['id']}** {r['title']}")
+                summary_lines.append(f"  <sub>{r['detail']}</sub>")
+        else:
+            summary_lines.append("_All checks passing._")
+        summary_lines += [
+            "",
+            "<sub>Full report: download the `consolidated-report` artifact.</sub>",
+            "",
+        ]
         with open(step_summary, "a", encoding="utf-8") as fh:
-            fh.write(md)
+            fh.write("\n".join(summary_lines))
 
     return 0 if threshold_met else 1
 

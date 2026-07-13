@@ -1,0 +1,49 @@
+# Gitleaks configuration for mule-test-automation.
+#
+# Extends the default ruleset instead of replacing it, so all built-in
+# detectors still fire. We only add allowlists for known-safe strings
+# that pattern-match as secrets but aren't — mostly:
+#   1. Maven settings.xml <password> templates that reference GitHub secrets
+#   2. Bash-variable references in the SonarQube boot job (${NEW_PASS} etc.)
+#   3. Documentation placeholders in README.md
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global allowlist for mule-test-automation"
+
+# regexTarget = "line" makes the regexes below match against the WHOLE
+# scanned line, not just the extracted secret substring. Without this,
+# gitleaks 8.x tests each regex against a rule-dependent capture group
+# which may not include the surrounding context we care about.
+regexTarget = "line"
+
+# stopwords is the belt-and-braces mechanism: if the flagged finding
+# contains ANY of these substrings anywhere, it's allowlisted. Cheap,
+# robust, and easy to reason about. Prefer this over regexes when the
+# false-positive can be identified by a distinctive keyword.
+stopwords = [
+  "ANYPOINT_CLIENT_ID",           # Anypoint Connected App env ref
+  "ANYPOINT_CLIENT_SECRET",       # Anypoint Connected App env ref
+  "NEW_PASS",                     # SonarQube admin-rotation bash var
+  "steps.sonar_token.outputs",    # GH Actions output reference for the token
+  "previousPassword=admin",       # part of the initial admin/admin rotation
+  "sonartoken",                   # sonar-report CLI flag
+  "SONAR_TOKEN",                  # sonar-scanner env var name
+]
+
+# Full-line regexes for patterns not adequately covered by a stopword.
+regexes = [
+  # Anypoint settings.xml: <password>${env.X}~?~${env.Y}</password>
+  '''\$\{env\.[A-Z_]+\}~\?~\$\{env\.[A-Z_]+\}''',
+  # README doc placeholder
+  '''-Danypoint\.password=<pass>''',
+  # Sonar curl POST body (both the pre-rotation `admin:admin` and post-rotation)
+  '''-u\s+["']?admin:(admin|\$\{NEW_PASS\})["']?''',
+]
+
+# Path allowlist — .claude/ is gitignored but be explicit in case it
+# ever gets staged accidentally.
+paths = [
+  '''^\.claude/''',
+]

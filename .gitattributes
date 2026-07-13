@@ -1,0 +1,11 @@
+reports/** linguist-generated=true
+
+# Mule application files
+src/**/*.xml linguist-language=XML
+
+# GitHub automation scripts
+.github/scripts/**/*.py linguist-language=Python
+
+# GitHub workflows
+.github/workflows/**/*.yml linguist-language=YAML
+.github/workflows/**/*.yaml linguist-language=YAML

@@ -1,21 +1,31 @@
 # ------------------------------------------------------------------------------ #
-# Java defaults (https://github.com/github/gitignore/blob/master/Java.gitignore) #
+# Java defaults                                                                  #
 # ------------------------------------------------------------------------------ #
 *.class
 
-# Package Files #
-*.jar
-*.war
-*.ear
+# ------------------------------------------------------------------------------ #
+# Maven / Mule build output                                                      #
+# ------------------------------------------------------------------------------ #
+target/
+.mule/
+classes/
+test-classes/
+reports/
+mule/
+.mule-dist/
+exchange-docs/
+security-report.json
+consolidated-ci-report.html
+mvn.log
+jmeter.log
 
-# ------------------------------------------------------------------------------------------- #
-# Eclipse-specific (https://github.com/github/gitignore/blob/master/Global/Eclipse.gitignore) #
-# ------------------------------------------------------------------------------------------- #
+# ------------------------------------------------------------------------------ #
+# Eclipse / Anypoint Studio                                                      #
+# ------------------------------------------------------------------------------ #
 *.pydevproject
 .metadata
 bin/**
 tmp/**
-tmp/**/*
 *.tmp
 *.bak
 *.swp
@@ -25,28 +35,37 @@ local.properties
 .loadpath
 .project
 .classpath
-
-# External tool builders
 .externalToolBuilders/
-
-# Locally stored "Eclipse launch configurations"
 *.launch
-
-# CDT-specific
 .cproject
-
-# PDT-specific
 .buildpath
-
-# --------------- #
-# Studio-specific #
-# --------------- #
-target/
-.mule/
-.DS_Store
-velocity.log
-
-# ------------------------------------------------------------------------------ #
-# ACB defaults #
-# ------------------------------------------------------------------------------ #
 .tooling-project
+
+# ------------------------------------------------------------------------------ #
+# IntelliJ IDEA                                                                  #
+# ------------------------------------------------------------------------------ #
+.idea/
+*.iml
+
+# ------------------------------------------------------------------------------ #
+# VS Code (personal, unless standardised across the team)                        #
+# ------------------------------------------------------------------------------ #
+.vscode/
+
+# ------------------------------------------------------------------------------ #
+# Claude Code local state (per-user permission cache, transcripts, etc.)         #
+# ------------------------------------------------------------------------------ #
+.claude/
+
+# ------------------------------------------------------------------------------ #
+# Python bytecode caches (auto-generated when running .py scripts locally)       #
+# ------------------------------------------------------------------------------ #
+__pycache__/
+*.pyc
+
+# ------------------------------------------------------------------------------ #
+# OS junk                                                                        #
+# ------------------------------------------------------------------------------ #
+.DS_Store
+Thumbs.db
+velocity.log

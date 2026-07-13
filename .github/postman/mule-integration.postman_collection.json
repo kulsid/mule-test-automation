@@ -1,0 +1,104 @@
+{
+  "info": {
+    "name": "mule-test-automation — Integration",
+    "description": "Exercises the deployed Mule application end-to-end via its HTTP listeners. Base URL is provided by the accompanying environment file.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "GET /hello returns Hello World!",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/hello",
+          "host": ["{{baseUrl}}"],
+          "path": ["hello"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('content-type is application/json', () => {",
+              "  pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json');",
+              "});",
+              "const body = pm.response.json();",
+              "pm.test(\"payload.message == 'Hello World!'\", () => {",
+              "  pm.expect(body.message).to.eql('Hello World!');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "GET /user-posts returns user + 10 posts",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/user-posts",
+          "host": ["{{baseUrl}}"],
+          "path": ["user-posts"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('response has user + posts shape', () => {",
+              "  pm.expect(body).to.have.property('user');",
+              "  pm.expect(body).to.have.property('posts');",
+              "});",
+              "pm.test('user.id == 1', () => pm.expect(body.user.id).to.eql(1));",
+              "pm.test(\"user.name == 'Leanne Graham'\", () => {",
+              "  pm.expect(body.user.name).to.eql('Leanne Graham');",
+              "});",
+              "pm.test(\"user.username == 'Bret'\", () => {",
+              "  pm.expect(body.user.username).to.eql('Bret');",
+              "});",
+              "pm.test('posts is an array of 10 entries', () => {",
+              "  pm.expect(body.posts).to.be.an('array');",
+              "  pm.expect(body.posts.length).to.eql(10);",
+              "});",
+              "pm.test('every post belongs to userId 1', () => {",
+              "  body.posts.forEach(p => pm.expect(p.userId).to.eql(1));",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "GET /unknown returns 404",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/unknown",
+          "host": ["{{baseUrl}}"],
+          "path": ["unknown"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('unmapped path returns 404', () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

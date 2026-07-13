@@ -1,4 +1,4 @@
-  name: GitHub Actions CI
+  name: MuleSoft CI Pipeline
 
   on:
     push:
@@ -9,39 +9,60 @@
 
   jobs:
     test:
-      name: Run MUnit + Enforce Coverage
+      name: '[Functional] MUnit Tests'
       runs-on: ubuntu-latest
 
       steps:
         - name: Checkout
           uses: actions/checkout@v5
 
-        - name: Set up JDK 17
-          uses: actions/setup-java@v5
+        - name: Set up JDK 11 + Maven 3.8.8
+          uses: s4u/setup-maven-action@v1.20.0
           with:
-            distribution: temurin
-            java-version: '17'
-            cache: maven
+            java-version: '11'
+            java-distribution: temurin
+            maven-version: 3.8.8
 
         - name: Run MUnit tests with coverage
           env:
             ANYPOINT_CLIENT_ID: ${{ secrets.ANYPOINT_CLIENT_ID }}
             ANYPOINT_CLIENT_SECRET: ${{ secrets.ANYPOINT_CLIENT_SECRET }}
+            # Coverage thresholds sourced from GitHub Actions repository
+            # variables. The ${{ vars.X || 'default' }} pattern gracefully
+            # falls back to the values baked into pom.xml if a repo variable
+            # is missing — a fork can just run without configuring anything.
+            COVERAGE_APP:      ${{ vars.MUNIT_COVERAGE_APP      || '80' }}
+            COVERAGE_RESOURCE: ${{ vars.MUNIT_COVERAGE_RESOURCE || '75' }}
+            COVERAGE_FLOW:     ${{ vars.MUNIT_COVERAGE_FLOW     || '70' }}
           run: |
             set -o pipefail
             mvn clean test \
               --settings .github/settings.xml \
               --batch-mode \
-              --no-transfer-progress 2>&1 \
+              --no-transfer-progress \
+              -Dcoverage.app="$COVERAGE_APP" \
+              -Dcoverage.resource="$COVERAGE_RESOURCE" \
+              -Dcoverage.flow="$COVERAGE_FLOW" 2>&1 \
               | grep -v 'org.apache.http.client.protocol.ResponseProcessCookies' \
               | tee mvn.log
+            echo "→ Coverage thresholds enforced: app=$COVERAGE_APP% · resource=$COVERAGE_RESOURCE% · flow=$COVERAGE_FLOW%"
 
-        # Optional diagnostic — the coverage report dir varies by MUnit version.
+        # Diagnostic — the coverage report dir varies by MUnit version.
+        # Prints to the log AND the step summary so we can see exactly what
+        # MUnit produced and where.
         - name: Show where the coverage report landed
           if: always()
           run: |
             echo "=== coverage / munit artifacts under target ==="
-            find target \( -iname '*coverage*' -o -iname '*munit*' -o -name '*.html' \) -print 2>/dev/null || true
+            LISTING=$(find target \( -iname '*coverage*' -o -iname '*munit*' -o -name '*.html' \) -print 2>/dev/null || true)
+            echo "${LISTING:-(no matching files found)}"
+            {
+              echo "### MUnit output files under target/"
+              echo ""
+              echo '```'
+              echo "${LISTING:-(no matching files found)}"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
 
         # Option A — render the coverage numbers on the workflow run page (no download)
         - name: Publish coverage to the run summary
@@ -57,19 +78,131 @@
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
 
-        # The downloadable full HTML report (unchanged — this is what worked)
+        # MUnit output paths vary across versions and micro-releases:
+        #   MUnit 2.3.x  → target/site/munit-coverage/index.html
+        #                  target/site/munit/coverage/index.html
+        #                  target/munit-reports/**
+        #   MUnit 3.x    → target/META-INF/mule-src/<app>/reports/
+        # Grab every candidate — actions/upload-artifact silently ignores
+        # missing paths, so listing extras is safe.
         - name: Publish coverage report artifact
           if: always()
           uses: actions/upload-artifact@v7
           with:
-            name: test-automation-coverage-report
+            name: detailed-munit-report
             path: |
+              target/site/munit/
+              target/site/munit-coverage/
+              target/munit-reports/
               target/META-INF/mule-src/*/reports/
-              target/site/munit/coverage/
+              target/**/index.html
+              target/**/coverage-summary.html
+              target/**/coverage.html
+              target/**/*coverage*.html
             if-no-files-found: warn
 
+        # Extract a compact structured summary for the consolidated report.
+        # Parses mvn.log (already captured above) rather than trying to read
+        # MUnit's JSON output, whose path varies across MUnit 2/3 versions.
+        - name: Build MUnit summary intermediate
+          if: always()
+          env:
+            COVERAGE_APP:      ${{ vars.MUNIT_COVERAGE_APP      || '80' }}
+            COVERAGE_RESOURCE: ${{ vars.MUNIT_COVERAGE_RESOURCE || '75' }}
+            COVERAGE_FLOW:     ${{ vars.MUNIT_COVERAGE_FLOW     || '70' }}
+            JOB_STATUS: ${{ job.status }}
+          run: |
+            python3 <<'PY'
+            import json, os, re
+            log = open('mvn.log', errors='replace').read() if os.path.exists('mvn.log') else ''
+
+            # MUnit 2's console summary looks like:
+            #   Tests: 2 · Errors: 0 · Failures: 0 · Skipped: 0
+            #   Application coverage: 100.0
+            #   Resource coverage: 100.0
+            #   Flow coverage: 100.0
+            def grab_int(pat):
+                m = re.search(pat, log, re.IGNORECASE)
+                return int(m.group(1)) if m else None
+            def grab_num(pat):
+                m = re.search(pat, log, re.IGNORECASE)
+                return float(m.group(1)) if m else None
+
+            summary = {
+              "job_status": os.environ.get("JOB_STATUS"),
+              "tests":     grab_int(r'Tests:\s*(\d+)'),
+              "errors":    grab_int(r'Errors:\s*(\d+)'),
+              "failures":  grab_int(r'Failures:\s*(\d+)'),
+              "skipped":   grab_int(r'Skipped:\s*(\d+)'),
+              "coverage": {
+                "application": grab_num(r'Application coverage:\s*([\d.]+)'),
+                "resource":    grab_num(r'Resource coverage:\s*([\d.]+)'),
+                "flow":        grab_num(r'Flow coverage:\s*([\d.]+)'),
+              },
+              "thresholds": {
+                "application": int(os.environ.get("COVERAGE_APP", "80")),
+                "resource":    int(os.environ.get("COVERAGE_RESOURCE", "75")),
+                "flow":        int(os.environ.get("COVERAGE_FLOW", "70")),
+              },
+            }
+            os.makedirs('munit-summary', exist_ok=True)
+            with open('munit-summary/munit-summary.json', 'w') as f:
+                json.dump(summary, f, indent=2)
+            print(json.dumps(summary, indent=2))
+            PY
+
+        - name: Upload MUnit summary intermediate
+          if: always()
+          uses: actions/upload-artifact@v7
+          with:
+            name: sec-intermediate-munit
+            path: munit-summary/munit-summary.json
+            retention-days: 1
+            if-no-files-found: warn
+
+    package:
+      name: '[Functional] Package JAR'
+      runs-on: ubuntu-latest
+      needs: [test]
+
+      steps:
+        - name: Checkout
+          uses: actions/checkout@v5
+
+        - name: Set up JDK 11 + Maven 3.8.8
+          uses: s4u/setup-maven-action@v1.20.0
+          with:
+            java-version: '11'
+            java-distribution: temurin
+            maven-version: 3.8.8
+
+        - name: Build deployable Mule application JAR
+          env:
+            ANYPOINT_CLIENT_ID: ${{ secrets.ANYPOINT_CLIENT_ID }}
+            ANYPOINT_CLIENT_SECRET: ${{ secrets.ANYPOINT_CLIENT_SECRET }}
+          run: |
+            mvn package -DskipTests \
+              --settings .github/settings.xml \
+              --batch-mode \
+              --no-transfer-progress
+
+        - name: List packaged artifacts
+          run: |
+            echo "=== Contents of target/ ==="
+            ls -lah target/*.jar 2>/dev/null || echo "no JARs found"
+
+        - name: Publish deployable JAR artifact
+          if: always()
+          uses: actions/upload-artifact@v7
+          with:
+            name: deployable-jar
+            path: |
+              target/*-mule-application.jar
+              target/*.jar
+            if-no-files-found: error
+
     security-scan:
-      name: MuleSoft Security Best-Practices Scan
+      name: '[Security] MuleSoft Security Best Practices'
       runs-on: ubuntu-latest
 
       steps:
@@ -77,6 +210,9 @@
           uses: actions/checkout@v5
 
         - name: Run security scan
+          env:
+            # Threshold sourced from GitHub Actions repository variables.
+            MULESOFT_SECURITY_MIN_PASS_PERCENT: ${{ vars.MULESOFT_SECURITY_MIN_PASS_PERCENT || '80' }}
           run: |
             python3 .github/scripts/security-scan.py
 
@@ -85,26 +221,24 @@
           uses: actions/upload-artifact@v7
           with:
             name: sec-intermediate-mulesoft
-            path: |
-              security-report.md
-              security-report.json
+            path: security-report.json
             retention-days: 1
             if-no-files-found: warn
 
     dependency-check:
-      name: OSV Vulnerability Scan
+      name: '[Security] OSV Scan'
       runs-on: ubuntu-latest
 
       steps:
         - name: Checkout
           uses: actions/checkout@v5
 
-        - name: Set up JDK 17
-          uses: actions/setup-java@v5
+        - name: Set up JDK 11 + Maven 3.8.8
+          uses: s4u/setup-maven-action@v1.20.0
           with:
-            distribution: temurin
-            java-version: '17'
-            cache: maven
+            java-version: '11'
+            java-distribution: temurin
+            maven-version: 3.8.8
 
         - name: Install OSV-Scanner
           env:
@@ -133,7 +267,7 @@
             # resolution so container/parent deps are included.
             osv-scanner scan source \
               --recursive \
-              --experimental-resolution-data-source=native \
+              --data-source=native \
               --format=json \
               --output=osv-report.json \
               . 2>&1 | tee osv-run.log
@@ -170,7 +304,7 @@
             if-no-files-found: warn
 
     gitleaks:
-      name: Gitleaks Secret Scan
+      name: '[Security] Gitleaks Scan'
       runs-on: ubuntu-latest
 
       steps:
@@ -191,17 +325,58 @@
         - name: Run Gitleaks
           run: |
             set +e
+            # gitleaks 8.x does NOT autodetect .gitleaks.toml at the source
+            # root — the config path must be passed explicitly, otherwise
+            # only the built-in default rules apply and allowlists are
+            # ignored. --verbose is essential for debugging false positives.
+            #
+            # gitleaks prints its ASCII banner + INF summary lines to stderr;
+            # capture them to gitleaks-run.log so the consolidated report
+            # can embed them. Use a plain `2>` redirect (not bash process
+            # substitution) so the file is fully flushed before the next
+            # step runs — process-sub races on fast runs and left the file
+            # empty.
             gitleaks detect \
+              --config .gitleaks.toml \
               --source . \
               --redact \
+              --verbose \
               --report-format json \
               --report-path gitleaks-report.json \
-              --exit-code 1
+              --exit-code 1 2> gitleaks-run.log
             rc=$?
+            # Also echo the captured log to the workflow log so it's visible
+            # in the run output.
+            echo "--- gitleaks stderr ---"
+            cat gitleaks-run.log
+            echo "-----------------------"
             # Guarantee an artifact even when the scan is clean and gitleaks
             # didn't write a file.
             if [[ ! -f gitleaks-report.json ]]; then
               echo '[]' > gitleaks-report.json
+            fi
+            # On failure, print the raw findings so we can see which rule
+            # fired against which line. Redacted values in the report keep
+            # secrets out of the log; the file+line+rule tell us what needs
+            # allowlisting in .gitleaks.toml.
+            if [[ $rc -ne 0 ]]; then
+              echo "=========================================================="
+              echo "  Gitleaks findings (redacted). If any of these are known"
+              echo "  false-positives (env vars, template strings, docs), add"
+              echo "  the distinctive keyword to stopwords in .gitleaks.toml."
+              echo "=========================================================="
+              python3 -c "
+            import json, sys
+            with open('gitleaks-report.json') as f:
+                findings = json.load(f)
+            for i, x in enumerate(findings, 1):
+                print(f'--- Finding {i}/{len(findings)} ---')
+                print(f'  Rule       : {x.get(\"RuleID\")}')
+                print(f'  Description: {x.get(\"Description\")}')
+                print(f'  File       : {x.get(\"File\")}:{x.get(\"StartLine\")}')
+                print(f'  Match      : {x.get(\"Match\", \"\")[:200]}')
+                print(f'  Secret     : {x.get(\"Secret\", \"\")[:100]}')
+            "
             fi
             exit $rc
 
@@ -210,24 +385,26 @@
           uses: actions/upload-artifact@v7
           with:
             name: sec-intermediate-gitleaks
-            path: gitleaks-report.json
+            path: |
+              gitleaks-report.json
+              gitleaks-run.log
             retention-days: 1
             if-no-files-found: warn
 
     sbom:
-      name: CycloneDX SBOM
+      name: '[Security] CycloneDX SBOM'
       runs-on: ubuntu-latest
 
       steps:
         - name: Checkout
           uses: actions/checkout@v5
 
-        - name: Set up JDK 17
-          uses: actions/setup-java@v5
+        - name: Set up JDK 11 + Maven 3.8.8
+          uses: s4u/setup-maven-action@v1.20.0
           with:
-            distribution: temurin
-            java-version: '17'
-            cache: maven
+            java-version: '11'
+            java-distribution: temurin
+            maven-version: 3.8.8
 
         - name: Generate CycloneDX SBOM
           run: |
@@ -248,49 +425,382 @@
             retention-days: 1
             if-no-files-found: warn
 
-    integration-test:
-      name: Integration Test
+    sonar-scan:
+      name: '[Security] SonarQube Scan'
       runs-on: ubuntu-latest
-      needs: [test, security-scan, gitleaks, sbom]
+
+      # Environment variables reused across steps. Kept in one place so bumping
+      # the SonarQube or plugin version is a one-line change.
+      env:
+        SONAR_VERSION: "9.9-community"
+        MULE_PLUGIN_VERSION: "1.1.0"
+        MULE_PLUGIN_URL: "https://github.com/mulesoft-catalyst/mule-sonarqube-plugin/releases/download/1.1.0/mule-validation-sonarqube-plugin-1.1.0-mule.jar"
+        SONAR_PROJECT_KEY: "mule-test-automation"
 
       steps:
         - name: Checkout
           uses: actions/checkout@v5
 
-        - name: Run integration tests against JSONPlaceholder
+        - name: Download Mule SonarQube plugin JAR
           run: |
-            bash .github/scripts/integration-test.sh
+            mkdir -p sonar-plugins
+            curl -sSfL "$MULE_PLUGIN_URL" -o sonar-plugins/mule-plugin.jar
+            ls -la sonar-plugins/
 
-    performance-test:
-      name: Performance Test
+        - name: Build SonarQube image with plugin baked in
+          run: |
+            # We can't hand a service container a custom image inline in
+            # GitHub Actions, so we build one locally, drop the plugin JAR
+            # into /opt/sonarqube/extensions/plugins/, and docker run it
+            # ourselves. Simpler than shelling into a running container.
+            cat > Dockerfile.sonar <<EOF
+            FROM sonarqube:${SONAR_VERSION}
+            COPY sonar-plugins/mule-plugin.jar /opt/sonarqube/extensions/plugins/
+            EOF
+            docker build -t sonarqube-mule:local -f Dockerfile.sonar .
+
+        - name: Start SonarQube container
+          run: |
+            docker run -d --name sonarqube \
+              -p 9000:9000 \
+              -e SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true \
+              sonarqube-mule:local
+
+        - name: Wait for SonarQube to become healthy
+          run: |
+            # SonarQube 9.9 takes ~45s to boot on a cold runner. Poll
+            # /api/system/status until it returns UP or we hit 3 min.
+            deadline=$(( SECONDS + 180 ))
+            while :; do
+              status=$(curl -sSf http://localhost:9000/api/system/status 2>/dev/null \
+                | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || true)
+              echo "SonarQube status: ${status:-<unreachable>}"
+              if [[ "$status" == "UP" ]]; then
+                echo "SonarQube is UP"
+                break
+              fi
+              if (( SECONDS >= deadline )); then
+                echo "ERROR: SonarQube did not start within 180s"
+                docker logs sonarqube --tail 200 || true
+                exit 1
+              fi
+              sleep 5
+            done
+
+        - name: Rotate default admin password and mint a scan token
+          id: sonar_token
+          run: |
+            # SonarQube ships with admin/admin on first boot. Change it once
+            # so we're not embedding the default password, then mint a token.
+            NEW_PASS="$(openssl rand -hex 12)"
+            curl -sSf -u admin:admin -X POST \
+              "http://localhost:9000/api/users/change_password" \
+              -d "login=admin&previousPassword=admin&password=${NEW_PASS}" >/dev/null
+            TOKEN=$(curl -sSf -u "admin:${NEW_PASS}" -X POST \
+              "http://localhost:9000/api/user_tokens/generate" \
+              -d "name=ci-scan-token" \
+              | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+            echo "::add-mask::$TOKEN"
+            echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+        - name: Run sonar-scanner
+          run: |
+            # Community SonarScanner CLI ships as its own Docker image.
+            # --network=host lets it reach the SonarQube container we booted.
+            docker run --rm --network=host \
+              -e SONAR_HOST_URL="http://localhost:9000" \
+              -e SONAR_TOKEN="${{ steps.sonar_token.outputs.token }}" \
+              -v "$PWD:/usr/src" \
+              sonarsource/sonar-scanner-cli:latest \
+              -Dsonar.projectKey="$SONAR_PROJECT_KEY" \
+              -Dsonar.projectName="mule-test-automation" \
+              -Dsonar.sources=src/main \
+              -Dsonar.tests=src/test \
+              -Dsonar.sourceEncoding=UTF-8
+
+        - name: Wait for background analysis to complete
+          run: |
+            # sonar-scanner returns as soon as it uploads; SonarQube processes
+            # the analysis in the background. Poll ce/activity until we see
+            # a task for this project in SUCCESS or FAILED state.
+            deadline=$(( SECONDS + 120 ))
+            while :; do
+              body=$(curl -sSf -u "${{ steps.sonar_token.outputs.token }}:" \
+                "http://localhost:9000/api/ce/component?component=$SONAR_PROJECT_KEY" || true)
+              status=$(echo "$body" | python3 -c "
+            import json,sys
+            d=json.load(sys.stdin)
+            q=d.get('queue',[])
+            cur=d.get('current')
+            print(q[0]['status'] if q else (cur['status'] if cur else 'NONE'))" 2>/dev/null || echo NONE)
+              echo "analysis status: $status"
+              if [[ "$status" == "SUCCESS" ]]; then
+                break
+              elif [[ "$status" == "FAILED" || "$status" == "CANCELED" ]]; then
+                echo "ERROR: analysis $status"; exit 1
+              fi
+              if (( SECONDS >= deadline )); then
+                echo "ERROR: analysis did not complete within 120s"; exit 1
+              fi
+              sleep 3
+            done
+
+        - name: Export SonarQube results
+          # Run even if the analysis-wait step failed — we still want to
+          # capture whatever partial state SonarQube has, so the
+          # consolidated report can render something instead of MISSING.
+          if: always()
+          run: |
+            mkdir -p reports/sonar
+
+            # If the token step was skipped/failed, we can't hit the API.
+            # Write empty-but-valid JSON stubs so the consolidator has
+            # inputs and renders "no data" instead of MISSING.
+            TOKEN="${{ steps.sonar_token.outputs.token }}"
+            if [[ -z "$TOKEN" ]]; then
+              echo "No Sonar token available (upstream step failed) — writing empty stubs"
+              echo '{}'                > reports/sonar/measures.json
+              echo '{"issues":[]}'     > reports/sonar/issues.json
+              echo '{"hotspots":[]}'   > reports/sonar/hotspots.json
+              exit 0
+            fi
+
+            # Check the SonarQube container is still up. If it was stopped
+            # (e.g. the analysis-wait step killed the job), skip API calls.
+            if ! curl -sSf "http://localhost:9000/api/system/status" >/dev/null 2>&1; then
+              echo "SonarQube unreachable — writing empty stubs"
+              echo '{}'                > reports/sonar/measures.json
+              echo '{"issues":[]}'     > reports/sonar/issues.json
+              echo '{"hotspots":[]}'   > reports/sonar/hotspots.json
+              exit 0
+            fi
+
+            AUTH="-u ${TOKEN}:"
+
+            echo "→ Fetching /api/measures/component"
+            curl -sSf $AUTH \
+              "http://localhost:9000/api/measures/component?component=$SONAR_PROJECT_KEY&metricKeys=bugs,vulnerabilities,code_smells,security_hotspots,coverage,duplicated_lines_density,ncloc,files,complexity,cognitive_complexity,sqale_index,reliability_rating,security_rating,sqale_rating" \
+              > reports/sonar/measures.json || echo '{}' > reports/sonar/measures.json
+
+            echo "→ Fetching /api/issues/search (all severities)"
+            curl -sSf $AUTH \
+              "http://localhost:9000/api/issues/search?componentKeys=$SONAR_PROJECT_KEY&ps=500" \
+              > reports/sonar/issues.json || echo '{"issues":[]}' > reports/sonar/issues.json
+
+            echo "→ Fetching /api/hotspots/search"
+            curl -sSf $AUTH \
+              "http://localhost:9000/api/hotspots/search?projectKey=$SONAR_PROJECT_KEY&ps=500" \
+              > reports/sonar/hotspots.json || echo '{"hotspots":[]}' > reports/sonar/hotspots.json
+
+            # HTML export — best effort. If it fails, we still have the JSON
+            # above and the consolidated report will render from that.
+            #
+            # --sonarcomponent is the project KEY (used in API calls).
+            # --project is only the display name.
+            echo "→ Attempting HTML export via sonar-report"
+            npx --yes sonar-report@3 \
+              --sonarurl "http://localhost:9000" \
+              --sonartoken "$TOKEN" \
+              --sonarcomponent "$SONAR_PROJECT_KEY" \
+              --project "mule-test-automation" \
+              --application "mule-test-automation" \
+              --release "${{ github.sha }}" \
+              --output reports/sonar/sonar-report.html \
+              2> reports/sonar/sonar-report-cli.log || \
+              echo "sonar-report CLI failed; raw JSON is still available"
+
+            ls -la reports/sonar/
+
+        - name: Stop SonarQube container
+          if: always()
+          run: |
+            docker logs sonarqube --tail 100 > sonarqube.log 2>&1 || true
+            docker stop sonarqube >/dev/null 2>&1 || true
+            docker rm sonarqube >/dev/null 2>&1 || true
+
+        - name: Upload SonarQube scan intermediate
+          if: always()
+          uses: actions/upload-artifact@v7
+          with:
+            name: sec-intermediate-sonar
+            path: |
+              reports/sonar/
+              sonarqube.log
+            retention-days: 1
+            if-no-files-found: warn
+
+        # Preserve the SonarQube-native HTML as a long-lived artifact.
+        # This one survives the intermediate-cleanup step in the
+        # consolidated report job because it's a different artifact name.
+        - name: Publish Sonar native HTML report
+          if: always()
+          uses: actions/upload-artifact@v7
+          with:
+            name: detailed-sonar-report
+            path: reports/sonar/sonar-report.html
+            if-no-files-found: warn
+
+    runtime-test:
+      name: '[Functional] Newman + JMeter'
       runs-on: ubuntu-latest
-      needs: [integration-test]
+      needs: [package]
 
       steps:
         - name: Checkout
           uses: actions/checkout@v5
 
-        - name: Install Apache Bench
-          run: |
-            sudo apt-get update
-            sudo apt-get install -y apache2-utils
+        - name: Set up JDK 11 + Maven 3.8.8
+          uses: s4u/setup-maven-action@v1.20.0
+          with:
+            java-version: '11'
+            java-distribution: temurin
+            maven-version: 3.8.8
 
-        - name: Run performance tests against local mock
+        - name: Set up Node.js
+          uses: actions/setup-node@v5
+          with:
+            node-version: '20'
+
+        - name: Install Newman + htmlextra reporter
+          run: |
+            npm install -g newman@6 newman-reporter-htmlextra@1
+
+        - name: Install Apache JMeter
           env:
-            REQUESTS: "100"
-            CONCURRENCY: "10"
-            MAX_MEAN_MS: "100"
-            MAX_P95_MS: "200"
-            MIN_SUCCESS_PCT: "99"
+            JMETER_VERSION: "5.6.3"
           run: |
-            bash .github/scripts/performance-test.sh
+            curl -sSfL "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-${JMETER_VERSION}.tgz" \
+              | tar -xz -C "$RUNNER_TEMP"
+            echo "$RUNNER_TEMP/apache-jmeter-${JMETER_VERSION}/bin" >> "$GITHUB_PATH"
+
+        - name: Download deployable JAR
+          uses: actions/download-artifact@v8
+          with:
+            name: deployable-jar
+            path: target
+
+        - name: Boot Mule Standalone (Community Edition 4.4.0)
+          env:
+            MULE_VERSION: "4.4.0"
+            MULE_HTTP_PORT: "8081"
+          run: |
+            bash .github/scripts/boot-mule.sh
+
+        - name: Run Newman (integration)
+          run: |
+            mkdir -p reports/integration
+            # `cli` for humans, `htmlextra` for the browsable individual
+            # artifact, `junit` for compatibility, and `json` for the
+            # consolidated report — the JSON export has per-request
+            # timings, all assertions, and response codes.
+            newman run .github/postman/mule-integration.postman_collection.json \
+              --environment .github/postman/local.postman_environment.json \
+              --reporters cli,htmlextra,junit,json \
+              --reporter-htmlextra-export reports/integration/report.html \
+              --reporter-junit-export reports/integration/junit.xml \
+              --reporter-json-export reports/integration/newman.json
+
+        - name: Run JMeter (performance)
+          env:
+            # Perf thresholds sourced from GitHub Actions repository variables.
+            # Defaults kept in the workflow so a fork with no configured
+            # variables still runs with the demo's original settings.
+            JMETER_USERS:                ${{ vars.JMETER_USERS                || '10' }}
+            JMETER_LOOPS:                ${{ vars.JMETER_LOOPS                || '10' }}
+            JMETER_RAMPUP_S:             ${{ vars.JMETER_RAMPUP_S             || '1' }}
+            JMETER_MAX_SAMPLE_MS:        ${{ vars.JMETER_MAX_SAMPLE_MS        || '500' }}
+            JMETER_MAX_SAMPLE_MS_DOWNSTREAM: ${{ vars.JMETER_MAX_SAMPLE_MS_DOWNSTREAM || '2000' }}
+          run: |
+            mkdir -p reports/performance
+            echo "→ JMeter: ${JMETER_USERS} users · ${JMETER_LOOPS} loops · ${JMETER_RAMPUP_S}s ramp-up"
+            echo "→ Thresholds: /hello ≤ ${JMETER_MAX_SAMPLE_MS}ms · /user-posts ≤ ${JMETER_MAX_SAMPLE_MS_DOWNSTREAM}ms"
+            jmeter -n \
+              -t .github/jmeter/mule-perf.jmx \
+              -l reports/performance/results.jtl \
+              -e -o reports/performance/html \
+              -Jhost=localhost \
+              -Jport=8081 \
+              -Jusers="$JMETER_USERS" \
+              -Jloops="$JMETER_LOOPS" \
+              -Jrampup="$JMETER_RAMPUP_S" \
+              -Jmax_sample_ms="$JMETER_MAX_SAMPLE_MS" \
+              -Jmax_sample_ms_downstream="$JMETER_MAX_SAMPLE_MS_DOWNSTREAM"
+
+        - name: Enforce JMeter assertion thresholds
+          env:
+            JMETER_MAX_FAILURES: ${{ vars.JMETER_MAX_FAILURES || '0' }}
+          run: |
+            # `jmeter -n` exits 0 even when Response/Duration assertions fail —
+            # column 8 (`success`) in the JTL is the source of truth.
+            fail=$(awk -F, 'NR>1 && $8=="false" {c++} END {print c+0}' reports/performance/results.jtl)
+            echo "Failed samples: $fail (allowed: $JMETER_MAX_FAILURES)"
+            if (( fail > JMETER_MAX_FAILURES )); then
+              echo "❌ JMeter reported $fail failing sample(s), threshold is $JMETER_MAX_FAILURES"
+              exit 1
+            fi
+
+        - name: Stop Mule
+          if: always()
+          run: |
+            bash .github/scripts/stop-mule.sh || true
+
+        - name: Publish integration report
+          if: always()
+          uses: actions/upload-artifact@v7
+          with:
+            name: detailed-integration-report
+            path: reports/integration/
+            if-no-files-found: warn
+
+        - name: Publish performance report
+          if: always()
+          uses: actions/upload-artifact@v7
+          with:
+            name: detailed-performance-report
+            path: reports/performance/
+            if-no-files-found: warn
+
+        # Compact intermediates that the consolidated report script parses.
+        # Both are best-effort — if runtime-test was skipped/failed early
+        # (Mule failed to boot, artifact download failed), these steps still
+        # run and just upload whatever partial output was written.
+        - name: Upload Newman summary intermediate
+          if: always()
+          uses: actions/upload-artifact@v7
+          with:
+            name: sec-intermediate-newman
+            path: |
+              reports/integration/junit.xml
+              reports/integration/newman.json
+            retention-days: 1
+            if-no-files-found: warn
+
+        - name: Upload JMeter summary intermediate
+          if: always()
+          uses: actions/upload-artifact@v7
+          with:
+            name: sec-intermediate-jmeter
+            path: reports/performance/results.jtl
+            retention-days: 1
+            if-no-files-found: warn
 
     security-consolidated-report:
-      name: Consolidated Security Report
+      name: Generate Consolidated Report
       runs-on: ubuntu-latest
-      needs: [performance-test, dependency-check]
-      # Render whatever intermediates exist, even if some upstream scans failed.
-      if: ${{ always() && needs.performance-test.result == 'success' }}
+      # Waits for everything that produces an intermediate for the report:
+      # `runtime-test` transitively depends on `test` (via `package`), so
+      # listing `runtime-test` is enough — the MUnit intermediate is
+      # guaranteed to exist by the time this job runs. Listing `test`
+      # separately would draw a redundant edge in the run graph that
+      # visually implies MUnit bypasses runtime-test.
+      needs:
+        - runtime-test
+        - security-scan
+        - gitleaks
+        - sbom
+        - dependency-check
+        - sonar-scan
+      if: ${{ always() }}
       permissions:
         # Required for the cleanup step to delete intermediate artifacts.
         actions: write
@@ -299,6 +809,27 @@
       steps:
         - name: Checkout
           uses: actions/checkout@v5
+
+        - name: Download MUnit summary intermediate
+          uses: actions/download-artifact@v8
+          with:
+            name: sec-intermediate-munit
+            path: munit-scan
+          continue-on-error: true
+
+        - name: Download Newman summary intermediate
+          uses: actions/download-artifact@v8
+          with:
+            name: sec-intermediate-newman
+            path: newman-scan
+          continue-on-error: true
+
+        - name: Download JMeter summary intermediate
+          uses: actions/download-artifact@v8
+          with:
+            name: sec-intermediate-jmeter
+            path: jmeter-scan
+          continue-on-error: true
 
         - name: Download MuleSoft scan intermediate
           uses: actions/download-artifact@v8
@@ -328,16 +859,27 @@
             path: osv-scan
           continue-on-error: true
 
+        - name: Download SonarQube scan intermediate
+          uses: actions/download-artifact@v8
+          with:
+            name: sec-intermediate-sonar
+            path: sonar-scan
+          continue-on-error: true
+
         - name: Render consolidated HTML report
           run: |
             python3 .github/scripts/render-security-report.py
 
-        - name: Publish consolidated security report artifact
+        - name: Publish consolidated CI report artifact
+          if: always()
           uses: actions/upload-artifact@v7
           with:
-            name: test-automation-security-report
-            path: security-report.html
-            if-no-files-found: error
+            name: consolidated-report
+            path: consolidated-ci-report.html
+            # warn (not error) so a missing HTML doesn't fail this upload —
+            # the render step itself is authoritative and will already have
+            # errored if it couldn't produce the file.
+            if-no-files-found: warn
 
         - name: Delete intermediate scan artifacts
           if: always()
@@ -349,10 +891,14 @@
             # them via the REST API as soon as the consolidated report is
             # built. Best-effort — a missing artifact is not an error.
             for name in \
+              sec-intermediate-munit \
+              sec-intermediate-newman \
+              sec-intermediate-jmeter \
               sec-intermediate-mulesoft \
               sec-intermediate-gitleaks \
               sec-intermediate-cyclonedx \
-              sec-intermediate-osv
+              sec-intermediate-osv \
+              sec-intermediate-sonar
             do
               id=$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
                 --jq ".artifacts[] | select(.name == \"$name\") | .id" 2>/dev/null | head -n1)
@@ -364,44 +910,59 @@
               fi
             done
 
-    package:
-      name: Package Deployable JAR
+        # Final gate: this job runs with `if: always()`, so its own success
+        # doesn't imply upstream success. Fail here if any producer job
+        # was not `success` — so build-successful can rely on this job's
+        # status alone without needing to list all producers in its needs.
+        # `test` isn't in this job's `needs`, but if `runtime-test`
+        # succeeded then `test` must have succeeded too (transitive
+        # dependency via `package`), so we only need to check what's here.
+        - name: Fail if any upstream job did not succeed
+          if: >
+            needs.runtime-test.result != 'success' ||
+            needs.security-scan.result != 'success' ||
+            needs.gitleaks.result != 'success' ||
+            needs.sbom.result != 'success' ||
+            needs.dependency-check.result != 'success' ||
+            needs.sonar-scan.result != 'success'
+          run: |
+            echo "One or more upstream jobs did not succeed:"
+            echo "  runtime-test:     ${{ needs.runtime-test.result }}"
+            echo "  security-scan:    ${{ needs.security-scan.result }}"
+            echo "  gitleaks:         ${{ needs.gitleaks.result }}"
+            echo "  sbom:             ${{ needs.sbom.result }}"
+            echo "  dependency-check: ${{ needs.dependency-check.result }}"
+            echo "  sonar-scan:       ${{ needs.sonar-scan.result }}"
+            exit 1
+
+    build-successful:
+      # Convergence node — purely for graph aesthetics. Only passes when
+      # BOTH terminal jobs succeed. `consolidated-report` has its own
+      # final "fail if any producer failed" gate, so a successful
+      # `consolidated-report` transitively means every scan and runtime
+      # step also succeeded.
+      name: Build Successful
       runs-on: ubuntu-latest
-      needs: [security-consolidated-report]
-      # Run once the consolidated report is built.
-      if: ${{ always() && needs.security-consolidated-report.result == 'success' }}
+      needs: [runtime-test, security-consolidated-report]
 
       steps:
-        - name: Checkout
-          uses: actions/checkout@v5
-
-        - name: Set up JDK 17
-          uses: actions/setup-java@v5
-          with:
-            distribution: temurin
-            java-version: '17'
-            cache: maven
-
-        - name: Build deployable Mule application JAR
-          env:
-            ANYPOINT_CLIENT_ID: ${{ secrets.ANYPOINT_CLIENT_ID }}
-            ANYPOINT_CLIENT_SECRET: ${{ secrets.ANYPOINT_CLIENT_SECRET }}
+        - name: Report success
           run: |
-            mvn package -DskipTests \
-              --settings .github/settings.xml \
-              --batch-mode \
-              --no-transfer-progress
-
-        - name: List packaged artifacts
-          run: |
-            echo "=== Contents of target/ ==="
-            ls -lah target/*.jar 2>/dev/null || echo "no JARs found"
-
-        - name: Publish deployable JAR artifact
-          uses: actions/upload-artifact@v7
-          with:
-            name: test-automation-deployable-jar
-            path: |
-              target/*-mule-application.jar
-              target/*.jar
-            if-no-files-found: error
+            echo "==========================================================="
+            echo "  BUILD SUCCESSFUL"
+            echo "==========================================================="
+            echo "  Functional lane   : PASSED"
+            echo "  Security lane     : PASSED"
+            echo "  Commit            : ${{ github.sha }}"
+            echo "  Run URL           : ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "==========================================================="
+            {
+              echo "## Build Successful"
+              echo ""
+              echo "Both lanes completed successfully."
+              echo ""
+              echo "- **Functional lane** (MUnit -> Package -> Newman + JMeter): PASSED"
+              echo "- **Security lane** (MuleSoft scan | Gitleaks | CycloneDX | OSV -> SonarQube -> Consolidated report): PASSED"
+              echo ""
+              echo "Artifacts published on this run: see the *Artifacts* section on the run summary page."
+            } >> "$GITHUB_STEP_SUMMARY"
