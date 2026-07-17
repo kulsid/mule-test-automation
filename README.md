@@ -2,6 +2,7 @@
 
 A demo MuleSoft application paired with a GitHub Actions CI pipeline that runs MUnit tests, five parallel security scans, integration tests via Newman, performance tests via JMeter, and builds a deployable JAR for the Anypoint Platform.
 
+
 The application exposes two HTTP listeners:
 
 - `GET /hello` — returns `{"message":"Hello World!"}`
